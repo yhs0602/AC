@@ -69,6 +69,8 @@ void CBotManager::Think()
        }
        m_fReAddBotDelay = -1.0f;
     }
+    // Coordinate once before any bot moves, using the same world snapshot.
+    if(!intermission && !m_bIdleBots) UpdateBotSquads();
     // Let all bots 'think'
     loopv(bots)
     {
@@ -293,6 +295,7 @@ void CBotManager::RenderBots()
 
 void CBotManager::EndMap()
 {
+    ResetBotSquads();
     // Remove all bots
     loopv(bots)
     {

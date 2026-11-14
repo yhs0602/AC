@@ -772,7 +772,7 @@ void parsemessages(int cn, playerent *d, ucharbuf &p, bool demo = false)
                     if(!d) continue;
                     if(d!=player1) d->state = state;
                     d->lifesequence = lifesequence;
-                    d->flagscore = flagscore;
+                    if(!m_botctf) d->flagscore = flagscore;
                     d->frags = frags;
                     d->deaths = deaths;
                     d->tks = teamkills;
@@ -962,25 +962,29 @@ void parsemessages(int cn, playerent *d, ucharbuf &p, bool demo = false)
                 int flag = getint(p);
                 if(flag<0 || flag>1) return;
                 flaginfo &f = flaginfos[flag];
-                f.state = getint(p);
-                switch(f.state)
+                int state = getint(p);
+                if(!m_botctf) f.state = state;
+                switch(state)
                 {
                     case CTFF_STOLEN:
-                        flagstolen(flag, getint(p));
+                    {
+                        int actor = getint(p);
+                        if(!m_botctf) flagstolen(flag, actor);
                         break;
+                    }
                     case CTFF_DROPPED:
                     {
                         float x = getuint(p)/DMF;
                         float y = getuint(p)/DMF;
                         float z = getuint(p)/DMF;
-                        flagdropped(flag, x, y, z);
+                        if(!m_botctf) flagdropped(flag, x, y, z);
                         break;
                     }
                     case CTFF_INBASE:
-                        flaginbase(flag);
+                        if(!m_botctf) flaginbase(flag);
                         break;
                     case CTFF_IDLE:
-                        flagidle(flag);
+                        if(!m_botctf) flagidle(flag);
                         break;
                 }
                 break;
@@ -992,7 +996,7 @@ void parsemessages(int cn, playerent *d, ucharbuf &p, bool demo = false)
                 int message = getint(p);
                 int actor = getint(p);
                 int flagtime = message == FM_KTFSCORE ? getint(p) : -1;
-                flagmsg(flag, message, actor, flagtime);
+                if(!m_botctf) flagmsg(flag, message, actor, flagtime);
                 break;
             }
 
@@ -1001,7 +1005,7 @@ void parsemessages(int cn, playerent *d, ucharbuf &p, bool demo = false)
                 int fcn = getint(p);
                 int flags = getint(p);
                 playerent *p = getclient(fcn);
-                if(p) p->flagscore = flags;
+                if(p && !m_botctf) p->flagscore = flags;
                 break;
             }
 

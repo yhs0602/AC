@@ -42,9 +42,16 @@ void CBot::Spawn()
 
      m_pMyEnt->targetyaw = m_pMyEnt->targetpitch = 0.0f;
      m_pMyEnt->enemy = NULL;
-     m_pMyEnt->maxspeed = 22.0f;
+     // AssaultCube physics requires the standard player speed for bots too.
+     m_pMyEnt->maxspeed = 16.0f;
      m_pMyEnt->pBot = this;
 
+     m_bSquadTask = false;
+     m_eSquadRole = botsquad::ASSAULT;
+     m_iFireteam = m_iSquadRepath = 0;
+     m_eCTFTask = botsquad::NO_FLAG_TASK;
+     m_iCTFGoalUpdate = 0;
+     m_vSquadGoal = m_vSquadFacing = m_pMyEnt->o;
      m_eCurrentBotState = STATE_NORMAL;
      m_iShootDelay = m_iChangeWeaponDelay = 0;
      m_iCheckEnvDelay = 0;

@@ -127,6 +127,7 @@ enum
     GMODE_BOTLSS,
     GMODE_BOTTEAMSURVIVOR,              // 20
     GMODE_BOTTEAMONESHOTONKILL,
+    GMODE_BOTCTF,                      // 22: local bot CTF
     GMODE_NUM
 };
 
@@ -154,16 +155,17 @@ enum
     GMMASK_BOTLSS               = 1 << GMODE_BOTLSS,
     GMMASK_BOTTEAMSURVIVOR      = 1 << GMODE_BOTTEAMSURVIVOR,              // 20
     GMMASK_BOTTEAMONESHOTONKILL = 1 << GMODE_BOTTEAMONESHOTONKILL,
+    GMMASK_BOTCTF               = 1 << GMODE_BOTCTF,
     GMMASK__ALL       = (1 << GMODE_NUM) - 1,
-    GMMASK__FLAGS     = GMMASK_CTF | GMMASK_HUNTTHEFLAG | GMMASK_KEEPTHEFLAG | GMMASK_TEAMKEEPTHEFLAG,
-    GMMASK__FLAGENTS  = GMMASK_CTF | GMMASK_KEEPTHEFLAG | GMMASK_TEAMKEEPTHEFLAG,
-    GMMASK__BOT       = GMMASK_BOTDEATHMATCH | GMMASK_BOTLSS | GMMASK_BOTONESHOTONEKILL | GMMASK_BOTPISTOLFRENZY | GMMASK_BOTTEAMDEATHMATCH | GMMASK_BOTTEAMONESHOTONKILL | GMMASK_BOTTEAMSURVIVOR,
+    GMMASK__FLAGS     = GMMASK_BOTCTF | GMMASK_CTF | GMMASK_HUNTTHEFLAG | GMMASK_KEEPTHEFLAG | GMMASK_TEAMKEEPTHEFLAG,
+    GMMASK__FLAGENTS  = GMMASK_BOTCTF | GMMASK_CTF | GMMASK_KEEPTHEFLAG | GMMASK_TEAMKEEPTHEFLAG,
+    GMMASK__BOT       = GMMASK_BOTCTF | GMMASK_BOTDEATHMATCH | GMMASK_BOTLSS | GMMASK_BOTONESHOTONEKILL | GMMASK_BOTPISTOLFRENZY | GMMASK_BOTTEAMDEATHMATCH | GMMASK_BOTTEAMONESHOTONKILL | GMMASK_BOTTEAMSURVIVOR,
     GMMASK__MP        = GMMASK_TEAMDEATHMATCH | GMMASK_COOPEDIT | GMMASK_DEATHMATCH | GMMASK_SURVIVOR | GMMASK_TEAMSURVIVOR | GMMASK_CTF | GMMASK_PISTOLFRENZY | GMMASK_LASTSWISSSTANDING
                       | GMMASK_ONESHOTONEKILL | GMMASK_TEAMONESHOTONEKILL | GMMASK_HUNTTHEFLAG | GMMASK_TEAMKEEPTHEFLAG | GMMASK_KEEPTHEFLAG | GMMASK_TEAMPF | GMMASK_TEAMLSS,
     GMMASK__MPNOCOOP  = GMMASK__MP & ~GMMASK_COOPEDIT,
-    GMMASK__TEAM      = GMMASK_BOTTEAMDEATHMATCH | GMMASK_BOTTEAMONESHOTONKILL | GMMASK_BOTTEAMSURVIVOR | GMMASK_TEAMDEATHMATCH | GMMASK_TEAMSURVIVOR | GMMASK_CTF
+    GMMASK__TEAM      = GMMASK_BOTCTF | GMMASK_BOTTEAMDEATHMATCH | GMMASK_BOTTEAMONESHOTONKILL | GMMASK_BOTTEAMSURVIVOR | GMMASK_TEAMDEATHMATCH | GMMASK_TEAMSURVIVOR | GMMASK_CTF
                       | GMMASK_TEAMONESHOTONEKILL | GMMASK_HUNTTHEFLAG | GMMASK_TEAMKEEPTHEFLAG | GMMASK_TEAMPF | GMMASK_TEAMLSS,
-    GMMASK__TEAMSPAWN = GMMASK_BOTTEAMDEATHMATCH | GMMASK_BOTTEAMONESHOTONKILL | GMMASK_BOTTEAMSURVIVOR | GMMASK_TEAMDEATHMATCH | GMMASK_TEAMSURVIVOR | GMMASK_CTF
+    GMMASK__TEAMSPAWN = GMMASK_BOTCTF | GMMASK_BOTTEAMDEATHMATCH | GMMASK_BOTTEAMONESHOTONKILL | GMMASK_BOTTEAMSURVIVOR | GMMASK_TEAMDEATHMATCH | GMMASK_TEAMSURVIVOR | GMMASK_CTF
                       | GMMASK_TEAMONESHOTONEKILL | GMMASK_HUNTTHEFLAG | GMMASK_TEAMPF | GMMASK_TEAMLSS,
     GMMASK__FFA       = GMMASK_BOTDEATHMATCH | GMMASK_BOTLSS | GMMASK_BOTONESHOTONEKILL | GMMASK_BOTPISTOLFRENZY | GMMASK_COOPEDIT | GMMASK_DEATHMATCH | GMMASK_SURVIVOR
                       | GMMASK_PISTOLFRENZY | GMMASK_LASTSWISSSTANDING | GMMASK_ONESHOTONEKILL | GMMASK_KEEPTHEFLAG,
@@ -172,7 +174,8 @@ enum
 };
 
 #define m_lms         (gamemode==3 || gamemode==4 || gamemode==20)
-#define m_ctf         (gamemode==5)
+#define m_botctf      (gamemode==GMODE_BOTCTF)
+#define m_ctf         (gamemode==5 || m_botctf)
 #define m_pistol      (gamemode==6 || gamemode==16 || gamemode==18)
 #define m_lss         (gamemode==9 || gamemode==17 || gamemode==19)
 #define m_osok        ((gamemode>=10 && gamemode<=12) || gamemode==21)
@@ -186,11 +189,11 @@ enum
 #define m_noguns      (m_nopistol && m_noprimary)
 #define m_arena       (m_lms || m_lss || m_osok)
 #define m_autospawn   (gamemode == 0 || gamemode == 2 || gamemode == 6 || gamemode == 13 || gamemode == 16)
-#define m_teammode    (gamemode==0 || gamemode==4 || gamemode==5 || gamemode==7 || gamemode==11 || gamemode==13 || gamemode==14 || gamemode==16 || gamemode==17 || gamemode==20 || gamemode==21)
+#define m_teammode    (m_botctf || gamemode==0 || gamemode==4 || gamemode==5 || gamemode==7 || gamemode==11 || gamemode==13 || gamemode==14 || gamemode==16 || gamemode==17 || gamemode==20 || gamemode==21)
 #define m_tarena      (m_arena && m_teammode)
-#define m_botmode     (gamemode==7 || gamemode == 8 || gamemode==12 || (gamemode>=18 && gamemode<=21))
+#define m_botmode     (m_botctf || gamemode==7 || gamemode == 8 || gamemode==12 || (gamemode>=18 && gamemode<=21))
 #define m_valid(mode) (((mode)>=0 && (mode)<GMODE_NUM) || (mode) == -1)
-#define m_mp(mode)    (m_valid(mode) && (mode)>=0 && (mode)!=7 && (mode)!=8 && (mode)!=12 && ((mode)<18 || (mode)>21))
+#define m_mp(mode)    ((mode)!=GMODE_BOTCTF && m_valid(mode) && (mode)>=0 && (mode)!=7 && (mode)!=8 && (mode)!=12 && ((mode)<18 || (mode)>21))
 #define m_demo        (gamemode==-1)
 #define m_coop        (gamemode==1)
 #define m_flags_      (m_ctf || m_htf || m_ktf) // trailing underscore is required to prevent name clash on FreeBSD systems

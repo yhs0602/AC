@@ -411,8 +411,116 @@ void trypickup(int n, playerent *d)
     }
 }
 
+// Bot CTF is an offline mode: the client owns both human and bot flag actions,
+// just as it owns bot combat. These actions never impersonate a network client.
+static int botCTFDroppedAt[2], botCTFPickupAfter[2];
+static playerent *botCTFDropper[2] = { NULL, NULL };
+
+void resetbotctf()
+{
+    loopi(2)
+    {
+        botCTFDroppedAt[i] = botCTFPickupAfter[i] = 0;
+        botCTFDropper[i] = NULL;
+    }
+}
+
+static void botctfbase(int flag)
+{
+    flaginfos[flag].state = CTFF_INBASE;
+    flaginbase(flag);
+    botCTFDropper[flag] = NULL;
+    botCTFDroppedAt[flag] = botCTFPickupAfter[flag] = 0;
+}
+
+void dropbotctfflags(playerent *d, bool manual)
+{
+    if(!m_botctf || !d) return;
+    loopi(2)
+    {
+        flaginfo &f = flaginfos[i];
+        if(f.state != CTFF_STOLEN || f.actor != d) continue;
+        if(OUTBORD(d->o.x, d->o.y))
+        {
+            botctfbase(i);
+            flagmsg(i, FM_RESET, -1, 0);
+            continue;
+        }
+        f.state = CTFF_DROPPED;
+        flagdropped(i, d->o.x, d->o.y, d->o.z);
+        // Unusable drop positions return immediately instead of losing the flag.
+        if(OUTBORD(f.pos.x, f.pos.y)) botctfbase(i);
+        else
+        {
+            f.actor = NULL; f.actor_cn = -1;
+            f.flagent->spawned = true; f.ack = true;
+            botCTFDroppedAt[i] = lastmillis;
+            botCTFDropper[i] = d;
+            botCTFPickupAfter[i] = lastmillis+3000;
+        }
+        flagmsg(i, manual ? FM_DROP : FM_LOST, d->clientnum, 0);
+    }
+}
+
+void touchbotctfflag(int flag, playerent *d)
+{
+    if(!m_botctf || intermission || ispaused || flag < 0 || flag > 1 ||
+       !d || d->state != CS_ALIVE || !team_isactive(d->team)) return;
+    flaginfo &f = flaginfos[flag], &other = flaginfos[1-flag];
+    if(!f.flagent || OUTBORD(f.flagent->x, f.flagent->y) || f.state == CTFF_STOLEN) return;
+    if(flag == team_base(d->team))
+    {
+        if(f.state == CTFF_DROPPED)
+        {
+            botctfbase(flag);
+            flagmsg(flag, FM_RETURN, d->clientnum, 0);
+        }
+        else if(f.state == CTFF_INBASE && other.state == CTFF_STOLEN && other.actor == d)
+        {
+            ++d->flagscore;
+            needscoresreorder = true;
+            botctfbase(1-flag);
+            flagmsg(1-flag, FM_SCORE, d->clientnum, 0);
+        }
+    }
+    else if((f.state == CTFF_INBASE || f.state == CTFF_DROPPED) &&
+            !(botCTFDropper[flag] == d && lastmillis < botCTFPickupAfter[flag]))
+    {
+        f.state = CTFF_STOLEN; f.actor = d; f.actor_cn = d->clientnum;
+        f.flagent->spawned = false; f.ack = true;
+        botCTFDropper[flag] = NULL;
+        flagmsg(flag, FM_PICKUP, d->clientnum, 0);
+    }
+}
+
+void updatebotctf()
+{
+    if(!m_botctf || ispaused || intermission) return;
+    loopi(2)
+    {
+        flaginfo &f = flaginfos[i];
+        if(!f.flagent || OUTBORD(f.flagent->x, f.flagent->y)) continue;
+        // SV_ITEMLIST/resetpickups clears every entity's spawned bit. Offline
+        // flags derive visibility/pickup eligibility from our local flag state.
+        f.flagent->spawned = f.state == CTFF_INBASE || f.state == CTFF_DROPPED;
+        f.ack = true;
+        if(f.state == CTFF_STOLEN)
+        {
+            if(!f.actor) botctfbase(i);
+            else if(f.actor->state != CS_ALIVE || !team_isactive(f.actor->team) ||
+                    team_base(f.actor->team) == i) dropbotctfflags(f.actor);
+        }
+        else if(f.state == CTFF_DROPPED && lastmillis-botCTFDroppedAt[i] >= 30000)
+        {
+            botctfbase(i);
+            flagmsg(i, FM_RESET, -1, 0);
+        }
+    }
+}
+
 void trypickupflag(int flag, playerent *d)
 {
+    if(m_botctf) { touchbotctfflag(flag, d); return; }
     if(d==player1)
     {
         flaginfo &f = flaginfos[flag];
@@ -553,6 +661,7 @@ void flagpickup(int fln)
 void tryflagdrop(bool manual)
 {
     if(ispaused) return;
+    if(m_botctf) { dropbotctfflags(player1, manual); return; }
     loopi(2)
     {
         flaginfo &f = flaginfos[i];

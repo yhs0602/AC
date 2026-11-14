@@ -12,6 +12,75 @@ For bots, choose Singleplayer > Bot Team Deathmatch (or another bot mode),
 then choose skill, player count, and ac_frontline. Restart the game after
 updating the menu configuration so the new map entry is loaded.
 
+Bot CTF
+-------
+Choose Singleplayer > Bot Capture the Flag > skill > 4vs4 > ac_frontline.
+This local mode supports human and bot flag pickup, scoring, death/manual drops,
+friendly flag recovery and automatic return after 30 seconds on the ground.
+Scoring requires your own flag to be home. Flag scores appear on the scoreboard.
+
+Balanced squads send the assault element to steal the enemy flag. The carrier
+returns directly to the home base, and the other attackers escort the carrier.
+Guards defend the home flag, recover it when dropped, and intercept a visible
+enemy carrier. Carriers prioritize their return over nonessential item hunting.
+Disabling leapfrog tactics with /botsquads 0 keeps the CTF objectives active.
+F3/F4/F7 orders also work in Bot CTF; F8 shows each bot's current flag task.
+The mode is offline only and does not change normal multiplayer CTF.
+
+Console alternative (start the map, then add bots for a human on CLA):
+    /bctf ac_frontline
+    /team CLA
+    /addnbot 3 CLA good
+    /addnbot 4 RVSF good
+
+Squad tactics (local team bot modes)
+-----------------------------------
+Rebuild the client and restart it to use the squad AI. Squad tactics are enabled
+by default and can be toggled in Singleplayer > Bot settings, or /botsquads 0|1.
+FFA bot modes retain their existing behavior. Maps need team bases or team spawns
+and a connected waypoint graph; automatic waypoint flooding runs on first load.
+
+The default balanced order splits bots into guards and an assault element.
+With a human and three bots, one bot guards and two bots form the assault pair.
+The assault element splits into two fireteams: one moves to a navigation point
+ahead while the other holds and watches toward the objective. Arrival and a
+nearby, armed support fireteam release the next bound, passing the first team.
+A blocked movement times out into regrouping at actual friendly positions.
+If only one assault fireteam survives, it proceeds without waiting for the dead.
+Critical health or ammunition needs can interrupt the assigned task for supplies.
+
+Change your own team's order during a match:
+    /botsquadorder balanced
+    /botsquadorder attack
+    /botsquadorder defend
+Inspect bot roles, fireteams and goals:
+    /botsquadstatus
+
+Default keyboard shortcuts: F3 attack, F4 defend, F7 balanced, F8 assignments.
+Change them in Settings > Keyboard > Squad command keys, or Singleplayer >
+Bot settings > Squad command keys. Existing custom key bindings take precedence
+over defaults. Restart the game to load the new defaults and menus. The editing
+mode actions on F7/F8 retain their original behavior.
+
+Orders reset to balanced on map changes. Attack assigns every bot to assault;
+defend assigns every bot to base defense. Enemy teams use balanced orders.
+The public SetBotSquadOrder(team, strategy) entry point is intended for a future
+player squad-leader interface. TDM objectives are static map bases, while CTF
+objectives follow flag state. Player-placed markers, cover-quality scoring and
+suppression simulation are not implemented.
+
+Validation: the macOS client builds, and the C++ fixture tests exercise the
+production coordinator on a detour waypoint graph, order changes, arrivals,
+reloading supports, casualties, regrouping and roster changes. Engine collision,
+combat feel and eight-player balance still require in-game playtesting.
+
+Bot CTF validation additionally covers the offline flag lifecycle, mode masks,
+pickup radius approach, navigation movement and independent weapon aim. An
+isolated macOS client run on ac_frontline completed two unopposed bot capture
+and score cycles at 3x game speed. A second run completed a one-minute simulated
+4v4 combat smoke test with seven bots and the human player slot. Longer matches,
+navigation edge cases and competitive balance still need playtesting.
+
 The default server map rotation limits this map's CTF teams to four players.
 Each team has six spawn positions and a flag in a protected rear shelter.
 The direct route crosses the central shell crater. Two sunken, dogleg trench
@@ -37,7 +106,7 @@ spawn/pickup access, symmetry, textures, and server copies:
 
 The compiled dedicated server successfully decoded and registered this map
 with spawns 6:6:12 and flags 1:1. Eight-player balance and client rendering
-still need an in-game playtest. Bot CTF is not a supported stock game mode.
+still need an in-game playtest. Bot CTF is provided by this modified client.
 
 Original map geometry and configuration: same license as the project source.
 Bundled textures and sky retain their existing asset licenses.

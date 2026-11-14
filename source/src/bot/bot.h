@@ -45,6 +45,11 @@
 
 #include "bot_util.h"
 #include "bot_waypoint.h"
+#include "bot_squad.h"
+
+void UpdateBotSquads();
+void ResetBotSquads();
+bool SetBotSquadOrder(int team, botsquad::Strategy strategy);
 
 extern itemstat itemstats[];
 
@@ -131,6 +136,7 @@ enum ECurrentBotState
      STATE_HUNT, // Bot is hunting an enemy
      STATE_ENT, // Bot is heading to an entity
      STATE_SP, // Bot is doing sp specific stuff
+     STATE_SQUAD, // Following a team assignment, including combat on the move
      STATE_NORMAL // Bot is doing normal navigation
 };
 
@@ -231,6 +237,16 @@ public:
      void SetMoveDir(int iMoveDir, bool add);
      void ResetCurrentTask();
 
+     // Squad assignment is independent of aiming skill and combat state.
+     bool m_bSquadTask;
+     botsquad::Role m_eSquadRole;
+     int m_iFireteam, m_iSquadRepath;
+     botsquad::CTFTask m_eCTFTask;
+     int m_iCTFGoalUpdate;
+     vec m_vSquadGoal, m_vSquadFacing;
+     bool DoSquadAI();
+     void NavigateSquad(bool combat);
+
      // AI Functions
      bool BotsAgainstHumans();
      bool DetectEnemy(playerent *p);
@@ -304,6 +320,7 @@ public:
 
      bool m_bSendC2SInit;
 
+     CBot() : m_bCalculatingAStarPath(false), m_bGoToDebugGoal(false) {}
      virtual ~CBot(void);
 
      virtual void Spawn(void);

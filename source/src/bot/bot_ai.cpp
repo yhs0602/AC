@@ -12,6 +12,8 @@
 
 #include "cube.h"
 #include "bot.h"
+#include <map>
+#include <queue>
 
 extern weaponinfo_s WeaponInfoTable[MAX_WEAPONS];
 
@@ -737,6 +739,411 @@ void CBot::CheckScope()
 }
 
 
+// Shared intent is kept outside individual combat states. No enemy positions are
+// read here: objectives come from map entities and friendly positions only.
+VARP(botsquads, 0, 1, 1);
+
+struct BotSquad
+{
+    botsquad::Strategy strategy;
+    bool initialized;
+    unsigned roster;
+    int moving, started;
+    int flagstate;
+    vec goal[2];
+    BotSquad() : strategy(botsquad::BALANCED), initialized(false), roster(0),
+                 moving(0), started(0), flagstate(-1)
+    {
+        goal[0] = goal[1] = vec(0, 0, 0);
+    }
+};
+static BotSquad botSquads[2];
+
+void ResetBotSquads()
+{
+    loopi(2) botSquads[i] = BotSquad();
+}
+
+bool SetBotSquadOrder(int team, botsquad::Strategy strategy)
+{
+    if(team < 0 || team > 1 || strategy < botsquad::BALANCED || strategy > botsquad::DEFEND)
+        return false;
+    botSquads[team].strategy = strategy;
+    botSquads[team].initialized = false;
+    return true;
+}
+
+static void botsquadorder(char *order)
+{
+    if(!m_botmode || !m_teammode || !team_isactive(player1->team))
+    {
+        conoutf("Squad orders require a local team bot match and an active team.");
+        return;
+    }
+    botsquad::Strategy strategy;
+    if(!strcmp(order, "attack")) strategy = botsquad::ATTACK;
+    else if(!strcmp(order, "defend")) strategy = botsquad::DEFEND;
+    else if(!strcmp(order, "balanced")) strategy = botsquad::BALANCED;
+    else { conoutf("botsquadorder attack|defend|balanced"); return; }
+    SetBotSquadOrder(team_base(player1->team), strategy);
+    conoutf("Squad order: %s", order);
+}
+COMMAND(botsquadorder, "s");
+
+static void botsquadstatus()
+{
+    if(!m_botmode || !m_teammode) return;
+    loopv(bots)
+    {
+        botent *b = bots[i];
+        if(!b || !b->pBot || !b->pBot->m_bSquadTask) continue;
+        CBot &ai = *b->pBot;
+        const char *task = ai.m_eSquadRole == botsquad::GUARD ? "defend" :
+            (b->o.dist(ai.m_vSquadGoal) > 3.0f ? "advance" : "overwatch");
+        if(m_botctf && ai.m_eCTFTask != botsquad::NO_FLAG_TASK)
+        {
+            static const char *tasks[] = { "defend", "steal flag", "return flag",
+                "escort carrier", "recover flag", "intercept carrier" };
+            task = tasks[ai.m_eCTFTask];
+        }
+        conoutf("%s: %s, fireteam %d, pos %.1f %.1f, goal %.1f %.1f", b->name, task,
+                ai.m_iFireteam+1, b->o.x, b->o.y, ai.m_vSquadGoal.x, ai.m_vSquadGoal.y);
+
+    }
+}
+COMMAND(botsquadstatus, "");
+
+static bool SquadBase(int team, vec &out)
+{
+    // A flag base is also a useful rally point in TDM on CTF-capable maps.
+    loopv(ents) if(ents[i].type == CTF_FLAG && ents[i].attr2 == team &&
+                  !OUTBORD(ents[i].x, ents[i].y))
+    {
+        out = vec(ents[i].x, ents[i].y, S(ents[i].x, ents[i].y)->floor+player1->eyeheight);
+        return true;
+    }
+    loopv(ents) if(ents[i].type == PLAYERSTART && ents[i].attr2 == team &&
+                  !OUTBORD(ents[i].x, ents[i].y))
+    {
+        out = vec(ents[i].x, ents[i].y, S(ents[i].x, ents[i].y)->floor+player1->eyeheight);
+        return true;
+    }
+    return false;
+}
+
+static node_s *SquadNode(vec goal)
+{
+    if(OUTBORD(goal.x, goal.y)) return NULL;
+    if(!SOLID(S(int(goal.x), int(goal.y))))
+        goal.z = S(int(goal.x), int(goal.y))->floor+player1->eyeheight;
+    node_s *node = WaypointClass.GetNearestWaypoint(goal, 16.0f);
+#ifdef WP_FLOOD
+    if(!node) node = WaypointClass.GetNearestFloodWP(goal, 16.0f, NULL);
+#endif
+    return node;
+}
+
+static vec SquadGround(const vec &goal, const vec &fallback)
+{
+    node_s *node = SquadNode(goal);
+    if(!node) return fallback;
+    vec result(node->v_origin);
+    // Flood nodes sit two cubes above ground; movement goals use eye position.
+    result.z = S(int(result.x), int(result.y))->floor+player1->eyeheight;
+    return result;
+}
+
+static vec SquadBound(const vec &from, const vec &objective)
+{
+    node_s *start = SquadNode(from), *end = SquadNode(objective);
+    if(!start || !end) return from;
+    // Bounds follow directed navigation links around trenches and buildings.
+    // This search does not mutate the per-bot incremental A* state.
+    std::map<node_s *, node_s *> parent;
+    std::queue<node_s *> open;
+    parent[start] = NULL; open.push(start);
+    while(!open.empty() && parent.find(end) == parent.end() && parent.size() < 8192)
+    {
+        node_s *node = open.front(); open.pop();
+        TLinkedList<node_s *>::node_s *link = node->ConnectedWPs.GetFirst();
+        for(; link; link = link->next)
+        {
+            node_s *next = link->Entry;
+            if(!next || OUTBORD(next->v_origin.x, next->v_origin.y) ||
+               SOLID(S(int(next->v_origin.x), int(next->v_origin.y))) ||
+               parent.find(next) != parent.end()) continue;
+            parent[next] = node; open.push(next);
+        }
+    }
+    if(parent.find(end) == parent.end()) return from;
+    vector<node_s *> path;
+    for(node_s *node = end; node; node = parent[node]) path.add(node);
+    float distance = 0;
+    vec previous(from);
+    for(int i = path.length()-1; i >= 0; --i)
+    {
+        distance += previous.dist(path[i]->v_origin);
+        previous = path[i]->v_origin;
+        if(distance >= 12.0f)
+        {
+            previous.z = S(int(previous.x), int(previous.y))->floor+player1->eyeheight;
+            return previous;
+        }
+    }
+    return objective;
+}
+
+static botsquad::CTFTask SquadCTFGoal(CBot &ai, botent *b, const vec &home,
+                                      const vec &objective, vec &goal)
+{
+    flaginfo &own = flaginfos[team_base(b->team)], &enemy = flaginfos[1-team_base(b->team)];
+    if(enemy.state == CTFF_STOLEN && enemy.actor == b)
+    {
+        goal = home;
+        return botsquad::RETURN_FLAG;
+    }
+    if(ai.m_eSquadRole == botsquad::GUARD)
+    {
+        if(own.state == CTFF_DROPPED)
+        {
+            goal = own.pos; goal.z += b->eyeheight;
+            return botsquad::RECOVER_FLAG;
+        }
+        if(own.state == CTFF_STOLEN && own.actor &&
+           ai.IsVisible(own.actor) && ai.IsInFOV(own.actor))
+        {
+            goal = own.actor->o;
+            return botsquad::INTERCEPT_FLAG;
+        }
+        return botsquad::NO_FLAG_TASK;
+    }
+    if(enemy.state == CTFF_DROPPED)
+    {
+        goal = enemy.pos; goal.z += b->eyeheight;
+        return botsquad::STEAL_FLAG;
+    }
+    if(enemy.state == CTFF_STOLEN && enemy.actor)
+    {
+        // Offset escorts from the friendly carrier to keep the return lane clear.
+        vec post(enemy.actor->o);
+        post.y += (ai.m_iFireteam&1) ? 4.0f : -4.0f;
+        goal = SquadGround(post, enemy.actor->o);
+        return botsquad::ESCORT_FLAG;
+    }
+    // Finish the last few metres at the flag entity, not at a nearby waypoint.
+    if(!botsquads || (b->o.dist(objective) < 14.0f && ai.IsReachable(objective, 1.0f)))
+        goal = objective;
+    return botsquad::STEAL_FLAG;
+}
+
+void UpdateBotSquads()
+{
+    loopv(bots) if(bots[i] && bots[i]->pBot) bots[i]->pBot->m_bSquadTask = false;
+    if((!botsquads && !m_botctf) || !m_botmode || !m_teammode) return;
+    loopi(2)
+    {
+        int team = i;
+        BotSquad &s = botSquads[team];
+        if(m_botctf && s.flagstate != flaginfos[1-team].state)
+        {
+            s.flagstate = flaginfos[1-team].state;
+            s.initialized = false;
+        }
+        vec home, objective;
+        if(!SquadBase(team, home) || !SquadBase(1-team, objective)) continue;
+        int count = 0;
+        unsigned roster = 0;
+        loopvj(bots) if(bots[j] && bots[j]->pBot && bots[j]->team == team)
+        {
+            ++count;
+            roster = roster*33u + unsigned(bots[j]->clientnum+1);
+        }
+        int guards = botsquad::guards(count, s.strategy), index = 0;
+        int alive[2] = {0, 0};
+        bool ready[2] = {false, false}, arrived[2] = {true, true};
+        vec center[2] = {vec(0, 0, 0), vec(0, 0, 0)};
+        loopvj(bots)
+        {
+            botent *b = bots[j];
+            if(!b || !b->pBot || b->team != team) continue;
+            int slot = index++;
+            CBot &ai = *b->pBot;
+            ai.m_eSquadRole = slot < guards ? botsquad::GUARD : botsquad::ASSAULT;
+            ai.m_iFireteam = (slot-guards)&1;
+            if(slot < guards || b->state != CS_ALIVE) continue;
+            int group = ai.m_iFireteam;
+            // Use an actual friendly position; a centroid can lie inside a wall.
+            if(!alive[group]) center[group] = b->o;
+            ++alive[group];
+            if(b->o.dist(s.goal[group]) > 4.0f) arrived[group] = false;
+            if(b->o.dist(s.goal[group]) <= 6.0f && b->health >= 30 &&
+               b->mag[b->gunselect] > 0 && !b->weaponsel->reloading)
+                ready[group] = true;
+        }
+        if(roster != s.roster) s.initialized = false;
+        s.roster = roster;
+        botsquad::Transition step = botsquad::WAIT;
+        if(s.initialized)
+            step = botsquad::transition(lastmillis-s.started, alive[s.moving],
+                     alive[1-s.moving], arrived[s.moving], ready[1-s.moving]);
+        if(!s.initialized || step == botsquad::REGROUP)
+        {
+            s.moving = 0; s.started = lastmillis;
+            loopj(2) s.goal[j] = alive[j] ? center[j] : home;
+            if(alive[0] && alive[1]) s.goal[0] = SquadBound(center[0], objective);
+            s.initialized = true;
+        }
+        else if(step == botsquad::ADVANCE)
+        {
+            int previous = s.moving;
+            s.moving = 1-s.moving; s.started = lastmillis;
+            // The second group passes the first, rather than merely catching up.
+            s.goal[s.moving] = SquadBound(s.goal[previous], objective);
+        }
+        index = 0;
+        loopvj(bots)
+        {
+            botent *b = bots[j];
+            if(!b || !b->pBot || b->team != team) continue;
+            CBot &ai = *b->pBot;
+            int slot = index++;
+            vec goal;
+            if(ai.m_eSquadRole == botsquad::GUARD)
+            {
+                // Spread guards around the base, with distinct navigation goals.
+                vec post(home);
+                post.x += (slot&1) ? 5.0f : -5.0f;
+                post.y += (slot/2)*4.0f;
+                goal = SquadGround(post, home);
+            }
+            else if(!alive[0] || !alive[1]) goal = SquadGround(objective, b->o);
+            else goal = s.goal[ai.m_iFireteam];
+            botsquad::CTFTask task = botsquad::NO_FLAG_TASK;
+            if(m_botctf)
+            {
+                task = SquadCTFGoal(ai, b, home, objective, goal);
+                // Moving carriers/interceptors should not restart A* every frame.
+                if(task == ai.m_eCTFTask && lastmillis < ai.m_iCTFGoalUpdate)
+                    goal = ai.m_vSquadGoal;
+                else ai.m_iCTFGoalUpdate = lastmillis+750;
+            }
+            if(task != ai.m_eCTFTask || ai.m_vSquadGoal.dist(goal) > 1.0f)
+            {
+                ai.ResetWaypointVars();
+                ai.m_iSquadRepath = 0;
+                ai.m_pTargetEnt = NULL;
+            }
+            ai.m_eCTFTask = task;
+            ai.m_bSquadTask = true;
+            ai.m_vSquadGoal = goal;
+            ai.m_vSquadFacing = objective;
+        }
+    }
+}
+
+void CBot::NavigateSquad(bool combat)
+{
+    vec goal(m_vSquadGoal);
+    m_vGoal = goal;
+    float yaw = m_pMyEnt->targetyaw, pitch = m_pMyEnt->targetpitch;
+    ResetMoveSpeed();
+    if(GetDistance(goal) <= (m_botctf ? 1.5f : 3.0f))
+    {
+        ResetWaypointVars();
+        if(!combat) AimToVec(m_vSquadFacing);
+        return;
+    }
+    bool moving = false;
+    vec steering(goal);
+    if(IsReachable(goal, 1.0f))
+    {
+        ResetWaypointVars();
+        AimToVec(goal);
+        m_pMyEnt->move = 1;
+        moving = true;
+    }
+    else
+    {
+        if(!m_pCurrentGoalWaypoint && lastmillis >= m_iSquadRepath)
+        {
+            ResetWaypointVars();
+            waypoint_s *from = GetNearestWaypoint(15.0f);
+            waypoint_s *to = GetNearestWaypoint(goal, 15.0f);
+#ifdef WP_FLOOD
+            if(!from || !to)
+            {
+                from = GetNearestFloodWP(15.0f);
+                to = GetNearestFloodWP(goal, 15.0f);
+            }
+#endif
+            if(from && to)
+            {
+                SetCurrentWaypoint(from);
+                SetCurrentGoalWaypoint(to);
+            }
+            m_iSquadRepath = lastmillis+1500;
+        }
+        if(m_pCurrentGoalWaypoint)
+        {
+            m_vGoal = goal;
+            // Legacy waypoint navigation expects forward movement on entry;
+            // it clears movement itself when waiting for a path or a turn.
+            m_pMyEnt->move = 1;
+            moving = HeadToGoal();
+            if(!moving) { ResetWaypointVars(); ResetMoveSpeed(); }
+            else if(m_pCurrentWaypoint) steering = m_pCurrentWaypoint->pNode->v_origin;
+        }
+    }
+    if(combat)
+    {
+        // Path movement and weapon aim use independent directions.
+        m_pMyEnt->targetyaw = yaw; m_pMyEnt->targetpitch = pitch;
+    }
+    if(moving && (m_pMyEnt->move || m_pMyEnt->strafe))
+    {
+        vec dir(steering); dir.sub(m_pMyEnt->o); dir.z = 0;
+        if(dir.magnitudexy() > 0.01f)
+        {
+            dir.normalize();
+            float forward = dir.x*cosf(RAD*(m_pMyEnt->yaw-90))+
+                            dir.y*sinf(RAD*(m_pMyEnt->yaw-90));
+            float right = dir.x*cosf(RAD*(m_pMyEnt->yaw-180))+
+                          dir.y*sinf(RAD*(m_pMyEnt->yaw-180));
+            m_pMyEnt->move = forward > 0.38f ? 1 : forward < -0.38f ? -1 : 0;
+            m_pMyEnt->strafe = right > 0.38f ? 1 : right < -0.38f ? -1 : 0;
+        }
+        CheckJump();
+    }
+}
+
+bool CBot::DoSquadAI()
+{
+    if(!m_bSquadTask) return false;
+    bool combat = BotManager.BotsShoot() && FindEnemy();
+    if(!combat) m_pMyEnt->enemy = NULL;
+    if(combat) ChoosePreferredWeapon();
+    CheckReload();
+    CheckScope();
+    // Urgent resupply can interrupt an assignment, ordinary pickups cannot.
+    bool urgent = m_pMyEnt->health < 30 ||
+        (!m_pMyEnt->ammo[m_pMyEnt->primary] && !m_pMyEnt->mag[m_pMyEnt->primary]);
+    if(!combat && urgent && m_eCTFTask != botsquad::RETURN_FLAG && CheckItems())
+    {
+        m_eCurrentBotState = STATE_ENT;
+        return true;
+    }
+    if(m_eCurrentBotState != STATE_SQUAD)
+    {
+        ResetWaypointVars();
+        m_iSquadRepath = 0;
+        m_pTargetEnt = NULL;
+    }
+    m_eCurrentBotState = STATE_SQUAD;
+    if(combat) ShootEnemy();
+    NavigateSquad(combat);
+    return true;
+}
+
 void CBot::MainAI()
 {
     // Default bots will run forward
@@ -751,6 +1158,8 @@ void CBot::MainAI()
 
     if (!BotManager.BotsShoot() && m_pMyEnt->enemy)
         m_pMyEnt->enemy = NULL; // Clear enemy when bots may not shoot
+
+    if (!m_bGoToDebugGoal && DoSquadAI()) return;
 
     if (m_bGoToDebugGoal) // For debugging the waypoint navigation
     {

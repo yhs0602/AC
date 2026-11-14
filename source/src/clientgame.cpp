@@ -429,6 +429,7 @@ COMMANDF(getmode, "i", (int *acr) { result(modestr(gamemode, *acr != 0)); });
 
 void deathstate(playerent *pl)
 {
+    if(m_botctf) dropbotctfflags(pl);
     pl->state = CS_DEAD;
     pl->spectatemode = SM_DEATHCAM;
     pl->lastdeath = pl->lastpain = lastmillis;
@@ -499,6 +500,7 @@ botent *newbotent()                 // create a new blank player
 
 void freebotent(botent *d)
 {
+    if(m_botctf) dropbotctfflags(d);
     loopv(players) if(players[i]==d)
     {
         DELETEP(players[i]);
@@ -687,6 +689,8 @@ void updateworld(int curtime, int lastmillis)        // main game update loop
     moveotherplayers();
     gets2c();
     showrespawntimer();
+
+    if(m_botctf) updatebotctf();
 
     // Added by Rick: let bots think
     if(m_botmode) BotManager.Think();
@@ -1094,6 +1098,7 @@ void zapplayerflags(playerent *p)
 
 void preparectf(bool cleanonly=false)
 {
+    resetbotctf();
     loopi(2) initflag(i);
     if(!cleanonly)
     {
@@ -1163,11 +1168,12 @@ void startmap(const char *name, bool reset, bool norespawn)   // called just aft
     if(norespawn) return;
 
     sendmapidenttoserver = true;
+    // Clear old carriers before removing bots or starting navigation on new ents.
+    preparectf(!m_flags_);
     if(m_botmode) BotManager.BeginMap(name);
     else kickallbots();
     showmipstats = false;
     clearbounceents();
-    preparectf(!m_flags_);
     suicided = -1;
     spawncycle = -1;
     lasthit = 0;
@@ -1231,6 +1237,16 @@ void flagmsg(int flag, int message, int actor, int flagtime)
 {
     static int musicplaying = -1;
     playerent *act = getclient(actor);
+    // Bot client numbers can differ from vector indexes after a bot is kicked.
+    if(m_botctf && actor != getclientnum())
+    {
+        act = NULL;
+        loopv(players) if(players[i] && players[i]->clientnum == actor)
+        {
+            act = players[i];
+            break;
+        }
+    }
     if(actor != getclientnum() && !act && message != FM_RESET) return;
     bool own = flag == team_base(player1->team);
     bool neutral = team_isspect(player1->team);
@@ -1564,7 +1580,7 @@ void clearvote() { DELETEP(curvote); DELETEP(calledvote); }
 const char *modestrings[] =
 {
     "tdm", "coop", "dm", "lms", "ts", "ctf", "pf", "btdm", "bdm", "lss",
-    "osok", "tosok", "bosok", "htf", "tktf", "ktf", "tpf", "tlss", "bpf", "blss", "btsurv", "btosok"
+    "osok", "tosok", "bosok", "htf", "tktf", "ktf", "tpf", "tlss", "bpf", "blss", "btsurv", "btosok", "bctf"
 };
 
 void setnext(char *mode, char *map)
@@ -1585,6 +1601,7 @@ void setnext(char *mode, char *map)
             case GMODE_BOTLSS:
             case GMODE_BOTPISTOLFRENZY:
             case GMODE_BOTTEAMONESHOTONKILL:
+            case GMODE_BOTCTF:
                 continue;
         }
         if(!strcmp(mode, modestrings[i]))

@@ -579,6 +579,10 @@ extern void resetsleep(bool force = false);
 extern int lastpm;
 //game mode extras
 extern void flagpickup(int fln);
+extern void resetbotctf();
+extern void updatebotctf();
+extern void dropbotctfflags(playerent *d, bool manual = false);
+extern void touchbotctfflag(int flag, playerent *d);
 extern void tryflagdrop(bool manual = false);
 extern void flagreturn(int fln);
 extern void flagscore(int fln);
