@@ -1,12 +1,33 @@
-Tips for compiling AssaultCube in Xcode:
+Building AssaultCube on Apple Silicon
+=====================================
 
-1. For “assaultcube” scheme/target:
-a) set “Release-Deployment” as configuration to build, in menu Product > Edit Scheme > Run > Build Configuration
-b) set 64-bit architecture in menu Product > Destination
-2. Build “assaultcube” scheme for "Release-Deployment" configuration, in result the package assaultcube.dmg will be created in subfolder under /private/var/root/Library/Developer/Xcode/DerivedData/
+Install Xcode and select it as the active developer directory. Install the
+native Homebrew dependencies once:
 
-Note:
-Assaultcube for Mac uses original 64-bit frameworks of SDL2, SDL2_image and from SDL2_mixer: Ogg and Vorbis, therefore has to be compiled as 64-bit.
-Self-compiled 32-bit frameworks are needed for potential custom compiling for 32-bit Mac.
-Launcher has to be compiled as 32-bit, otherwise it won't start nowadays.
+    brew install sdl2 sdl2_image libogg libvorbis
 
+From the repository root, run:
+
+    ./build-macos.sh
+    ./run-macos.sh
+
+The game and launcher targets build arm64 in all configurations. SDL2,
+SDL2_image, Ogg, Vorbis and their dependencies come from native Homebrew
+libraries, replacing the old Intel-only frameworks. Current Homebrew SDL2
+uses sdl2-compat, which loads SDL3 at runtime; SDL3 is also bundled.
+
+The build phase embed_native_libraries.py copies the full library dependency
+chain into the app, rewrites load paths and applies ad-hoc signatures. It
+rejects binaries that are not arm64-only. The resulting app uses no Homebrew
+paths at runtime and does not require Rosetta. Xcode builds use /opt/homebrew
+by default; build-macos.sh passes the active Homebrew prefix explicitly.
+
+The app is built at build/Products/Release/assaultcube.app. The run script
+starts the executable from the repository root so it can find config/, bot/
+and packages/. Player settings are stored in ~/.assaultcube/v1.3.
+
+The project deployment target is macOS 12; Homebrew dependencies may require
+a newer macOS version, depending on the installed bottles.
+
+Release-Deployment additionally creates a DMG containing the launcher and
+game data. Normal Release builds skip this packaging phase.

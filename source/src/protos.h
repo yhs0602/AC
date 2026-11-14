@@ -1047,6 +1047,7 @@ extern void filterconfigset(char *list, void *cs = NULL);
 extern void fatal(const char *s, ...) PRINTFARGS(1, 2);
 extern void initserver(bool dedicated);
 extern void cleanupserver();
+extern void stopdeferredprocessing();
 extern void localconnect();
 extern void localdisconnect();
 extern void localclienttoserver(int chan, ENetPacket *);

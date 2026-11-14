@@ -885,6 +885,151 @@ void CBot::MainAI()
     }
 }
 
+// Use the same movement axes as moveplayer(), independently of aiming pitch.
+static vec BotMoveVector(float yaw, int move, int strafe)
+{
+    vec dir(move*cosf(RAD*(yaw-90)) + strafe*cosf(RAD*(yaw-180)),
+            move*sinf(RAD*(yaw-90)) + strafe*sinf(RAD*(yaw-180)), 0);
+    if (move || strafe) dir.normalize();
+    return dir;
+}
+
+// Sweep the bot's square footprint, as used by plcollide(), toward a player.
+static bool BotPlayerInPath(botent *bot, playerent *other, const vec &dir, float distance)
+{
+    if (!other || other == bot || other->state != CS_ALIVE || !other->cancollide)
+        return false;
+    if (bot->o.z-bot->eyeheight >= other->o.z+other->aboveeye ||
+        other->o.z-other->eyeheight >= bot->o.z+bot->aboveeye)
+        return false;
+
+    vec delta(other->o);
+    delta.sub(bot->o);
+    // Allow movement away from an existing overlap.
+    if (delta.x*dir.x + delta.y*dir.y <= 0) return false;
+    float radius = bot->radius + other->radius + 0.15f;
+    float near = 0, far = distance;
+    for (int axis = 0; axis < 2; ++axis)
+    {
+        float offset = axis ? delta.y : delta.x;
+        float speed = axis ? dir.y : dir.x;
+        if (fabs(speed) < 0.001f)
+        {
+            if (fabs(offset) >= radius) return false;
+        }
+        else
+        {
+            float a = (offset-radius)/speed, b = (offset+radius)/speed;
+            near = max(near, min(a, b));
+            far = min(far, max(a, b));
+            if (near > far) return false;
+        }
+    }
+    return true;
+}
+
+// Probe with the real entity so collide() excludes the bot itself. Restore all
+// entity fields changed by collide(); probes never move the bot in the world.
+static bool BotCanMove(botent *bot, const vec &dir, float distance)
+{
+    const vec origin(bot->o), velocity(bot->vel);
+    const bool onfloor = bot->onfloor;
+    bool clear = true;
+    bot->vel = dir;
+    int steps = int(ceilf(distance/0.25f));
+    for (int step = 1; step <= steps; ++step)
+    {
+        bot->o.x = origin.x + dir.x*distance*step/steps;
+        bot->o.y = origin.y + dir.y*distance*step/steps;
+        if (collide(bot, false, 0, 1.25f) || (onfloor && !bot->onfloor))
+        {
+            clear = false;
+            break;
+        }
+    }
+    bot->o = origin;
+    bot->vel = velocity;
+    bot->onfloor = onfloor;
+    return clear;
+}
+
+void CBot::AvoidPlayers()
+{
+    botent *bot = m_pMyEnt;
+    // Hold an escape direction in world space even while aiming at an enemy.
+    if (m_iBotAvoidTime > lastmillis)
+    {
+        vec forward = BotMoveVector(bot->yaw, 1, 0);
+        vec left = BotMoveVector(bot->yaw, 0, 1);
+        float f = m_vBotAvoidDir.dot(forward), l = m_vBotAvoidDir.dot(left);
+        int move = fabs(f) > 0.382683f ? (f > 0 ? 1 : -1) : 0;
+        int strafe = fabs(l) > 0.382683f ? (l > 0 ? 1 : -1) : 0;
+        if (BotCanMove(bot, BotMoveVector(bot->yaw, move, strafe), 0.75f))
+        {
+            bot->move = move;
+            bot->strafe = strafe;
+            return;
+        }
+        m_iBotAvoidTime = 0;
+    }
+
+    if (!bot->move && !bot->strafe)
+    {
+        m_iBotBlockedTime = 0;
+        return;
+    }
+
+    vec direction = BotMoveVector(bot->yaw, bot->move, bot->strafe);
+    playerent *blocker = NULL;
+    float nearest = 1e10f;
+    loopv(players)
+    {
+        playerent *other = players[i];
+        if (BotPlayerInPath(bot, other, direction, 2.0f) && bot->o.dist(other->o) < nearest)
+        {
+            blocker = other;
+            nearest = bot->o.dist(other->o);
+        }
+    }
+    if (BotPlayerInPath(bot, player1, direction, 2.0f) && bot->o.dist(player1->o) < nearest)
+        blocker = player1;
+
+    if (!blocker)
+    {
+        m_iBotBlockedTime = 0;
+        return;
+    }
+
+    vec progress(bot->o);
+    progress.sub(m_vBotBlockedOrigin);
+    if (!m_iBotBlockedTime || progress.magnitudexy() > 0.5f)
+    {
+        m_iBotBlockedTime = lastmillis;
+        m_vBotBlockedOrigin = bot->o;
+    }
+
+    bool headon = direction.dot(BotMoveVector(blocker->yaw, 1, 0)) < -0.5f;
+    bool yield = blocker->type != ENT_BOT || bot->clientnum > blocker->clientnum;
+    // Both bots keep their own right side. If the corridor is too narrow,
+    // only the lower-priority bot backs up, breaking the head-on deadlock.
+    const int moves[]   = { 0, 0, -1, -1, -1 };
+    const int strafes[] = {-1, 1, -1,  1,  0 };
+    for (int i = 0; i < 5; ++i)
+    {
+        if (i >= 2 && (!headon || !yield) && lastmillis-m_iBotBlockedTime < 1500)
+            continue;
+        vec escape = BotMoveVector(bot->yaw, moves[i], strafes[i]);
+        if (!BotCanMove(bot, escape, 1.5f)) continue;
+        bot->move = moves[i];
+        bot->strafe = strafes[i];
+        m_vBotAvoidDir = escape;
+        m_iBotAvoidTime = lastmillis + 450;
+        return;
+    }
+    // Wait for the player ahead instead of continuously pushing or jumping.
+    ResetMoveSpeed();
+}
+
 void CBot::DoCombatNav()
 {
     if (m_iCombatNavTime > lastmillis)

@@ -176,6 +176,8 @@ public:
      float m_iStuckCheckDelay;
      bool m_bStuck;
      int m_iStuckTime;
+     int m_iBotAvoidTime, m_iBotBlockedTime;
+     vec m_vBotAvoidDir, m_vBotBlockedOrigin;
      int m_iStrafeTime;
      int m_iStrafeCheckDelay;
      int m_iMoveDir;
@@ -242,6 +244,7 @@ public:
      void DoCombatNav(void);
      void MainAI(void);
      bool CheckStuck(void);
+     void AvoidPlayers(void);
      bool CheckJump(void);
      bool CheckCrouch(void);
      bool CheckStrafe(void);

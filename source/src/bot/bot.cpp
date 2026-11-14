@@ -52,6 +52,9 @@ void CBot::Spawn()
      m_iStuckCheckDelay = lastmillis + 250;
      m_bStuck = false;
      m_iStuckTime = 0;
+     m_iBotAvoidTime = m_iBotBlockedTime = 0;
+     m_vBotAvoidDir = g_vecZero;
+     m_vBotBlockedOrigin = m_pMyEnt->o;
      m_iStrafeTime = m_iStrafeCheckDelay = 0;
      m_iMoveDir = DIR_NONE;
 
@@ -120,6 +123,7 @@ void CBot::Think()
     else { ResetMoveSpeed(); }
     // Aim to ideal yaw and pitch
     AimToIdeal();
+    if (!BotManager.IdleBots()) AvoidPlayers();
     // Store current location, to see if the bot is stuck
     m_vPrevOrigin = m_pMyEnt->o;
     // Don't check for stuck if the bot doesn't want to move

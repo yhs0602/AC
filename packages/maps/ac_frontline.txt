@@ -1,0 +1,43 @@
+ac_frontline - Trenches & Outposts
+================================
+
+Compact 4v4 Capture the Flag map for AssaultCube.
+
+Play
+----
+Select ac_frontline in the CTF map menu, or use:
+    /ctf ac_frontline
+
+For bots, choose Singleplayer > Bot Team Deathmatch (or another bot mode),
+then choose skill, player count, and ac_frontline. Restart the game after
+updating the menu configuration so the new map entry is loaded.
+
+The default server map rotation limits this map's CTF teams to four players.
+Each team has six spawn positions and a flag in a protected rear shelter.
+The direct route crosses the central shell crater. Two sunken, dogleg trench
+routes allow flank attacks. Both compounds have three approaches, with blast
+barriers shielding their spawn areas. Supplies and terrain are balanced by
+180-degree rotational symmetry. Red/brown and blue flooring mark the bases.
+
+Installation
+------------
+The client uses packages/maps/ac_frontline.cgz and ac_frontline.cfg.
+Dedicated servers use the matching copies in packages/maps/servermaps.
+All textures and the sky are already bundled with the game.
+The menu preview is a top-down layout, not an in-game screenshot.
+
+Editing and validation
+----------------------
+Regenerate geometry and synchronize the server copies from the repository root:
+    python3 source/tools/generate_frontline.py
+
+Validate the shipped files, standing clearance, walkable flag routes,
+spawn/pickup access, symmetry, textures, and server copies:
+    python3 -m unittest discover -s source/tests -p test_frontline_map.py -v
+
+The compiled dedicated server successfully decoded and registered this map
+with spawns 6:6:12 and flags 1:1. Eight-player balance and client rendering
+still need an in-game playtest. Bot CTF is not a supported stock game mode.
+
+Original map geometry and configuration: same license as the project source.
+Bundled textures and sky retain their existing asset licenses.

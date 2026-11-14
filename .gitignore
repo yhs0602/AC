@@ -16,8 +16,10 @@ config/entropy.dat
 config/servervita*
 packages/maps/*.cfg
 !packages/maps/new_content.cfg
+!packages/maps/ac_frontline.cfg
 packages/maps/*.cgz
 !packages/maps/new_content.cgz
+!packages/maps/ac_frontline.cgz
 !packages/maps/dev_*.cgz
 packages/misc/checksums_md5.txt
 source/codeblocks/AssaultCube.layout
@@ -42,3 +44,15 @@ profile/*
 logs/*
 private/*
 .DS_Store
+
+# Local tooling and generated files
+/.serena/
+/build/
+__pycache__/
+*.py[cod]
+
+# Xcode build output and per-user settings
+/source/xcode/build/
+/source/xcode/DerivedData/
+xcuserdata/
+*.xcuserstate

@@ -2,6 +2,7 @@
 // runs dedicated or as client coroutine
 
 #include "cube.h"
+#include <atomic>
 
 #ifdef STANDALONE
 #define DEBUGCOND (true)
@@ -3046,15 +3047,18 @@ struct servinfoauth
 };
 
 ringbuf<servinfoauth *, 16> servinfoauths;
-volatile servinfoauth *servinfoauth_dropbox = NULL;
-volatile bool servinfoauth_done = false;
+servinfoauth *servinfoauth_dropbox = NULL;
+std::atomic<bool> servinfoauth_done(false);
 sl_semaphore servinfoauth_deferred(0, NULL);
+static void *deferredprocessingthread_ti = NULL;
+static std::atomic<bool> deferredprocessing_stopping(false);
 
 int deferredprocessingthread(void *nop)
 {
     for(;;)
     {
         servinfoauth_deferred.wait();
+        if(deferredprocessing_stopping.load()) break;
         if(!servinfoauth_done && servinfoauths.length())
         {
             servinfoauth *sa = servinfoauths.remove();
@@ -3079,15 +3083,30 @@ int deferredprocessingthread(void *nop)
     return 0;
 }
 
+void stopdeferredprocessing()
+{
+    // Wake and join before SDL shutdown or destruction of the global semaphore.
+    deferredprocessing_stopping.store(true);
+    if(deferredprocessingthread_ti)
+    {
+        servinfoauth_deferred.post();
+        sl_waitthread(deferredprocessingthread_ti);
+        deferredprocessingthread_ti = NULL;
+    }
+    delete (servinfoauth *)servinfoauth_dropbox;
+    servinfoauth_dropbox = NULL;
+    servinfoauth_done = false;
+    while(!servinfoauths.empty()) delete servinfoauths.remove();
+}
+
 void polldeferredprocessing()
 {
-    static void *deferredprocessingthread_ti = NULL;
+    if(deferredprocessing_stopping.load()) return;
     if(!deferredprocessingthread_ti) deferredprocessingthread_ti = sl_createthread(deferredprocessingthread, NULL);
 
     if(servinfoauth_done)
     {
         servinfoauth *sa = (servinfoauth *)servinfoauth_dropbox;
-        servinfoauth_done = false;
         switch(sa->type)
         {
             case SV_SERVINFO_RESPONSE:
@@ -3126,6 +3145,8 @@ void polldeferredprocessing()
             }
         }
         delete sa;
+        servinfoauth_dropbox = NULL;
+        servinfoauth_done = false;
     }
     if(!servinfoauths.empty() && servinfoauth_deferred.getvalue() < 1) servinfoauth_deferred.post();
 }
@@ -4699,6 +4720,7 @@ void serverslice(uint timeout)   // main server update, called from cube main lo
 
 void cleanupserver()
 {
+    stopdeferredprocessing();
     if(serverhost) { enet_host_destroy(serverhost); serverhost = NULL; }
     if(svcctrl)
     {

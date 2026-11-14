@@ -4,6 +4,7 @@
 
 void cleanup(char *msg)         // single program exit point;
 {
+    stopdeferredprocessing();
     if(clientlogfile) clientlogfile->fflush();
     if(!msg)
     {
